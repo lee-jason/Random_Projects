@@ -63,7 +63,7 @@ nicoNicoTwitch = function(){
 	
 	
 	//so in this implementation of mimicking niconico, an array of text.  The amount of values will be the height of the video player divided by the size of the text? +- some margin
-	//text can only be queued for each index if the time that one finishes the other starts what?>asdjfkl
+	//incoming text can only be queued for each index if the current text in the same line has completly exited before the beginning of queued line touches the beginning.  multiple text on same line should never collide.
 	
 	var TextObject = function(text, posX, posY, width, velocity, color){
 		this.text = text || "";
@@ -103,9 +103,9 @@ nicoNicoTwitch = function(){
 		textPreProcObj = textPreProcess(text);
 		tempTextObj.text = textPreProcObj.text;
 		//the way width needs to be calculated needs to also consider the space that the emotes take up.
-		//lets say that each emote is constant EMOTE_PIXEL_WIDTH for now.
+		//lets say that each emote is constant EMOTE_PIXEL_WIDTH for now. In the future, should create an emote object that identifies the width of the img.
 		tempTextObj.width = nicoContext.measureText(text).width + (textPreProcObj.emoteCount * EMOTE_PIXEL_WIDTH);
-		//speed is calculated post text process, emotes are calculated to be around 8 characters long.
+		//speed is calculated post text process, emotes are calculated to be around 8 characters long. current speed setup is longer text moves across the screen faster.
 		if(tempTextObj.text.length < 30){
 			tempTextObj.velocity = helper.getRandomInt(3,6);
 		}
@@ -166,49 +166,59 @@ nicoNicoTwitch = function(){
 	}
 	
 	//this function will apply some pre-processing to the text to remove any html from emoticons and replacing it with a placeholder
-	//will replace all emoticon spans with @@##||| where ## is the number emoticon
-	//emoticons are in the form of this <span class="emo-64 emoticon"></span>
+	//will replace all emoticon spans with @@\w||| where ## is the number emoticon. will also check and if new emoticons need to be added to the emoticonUrlMap
+	//emoticons come in this form <img class="emoticon" src="http://static-cdn.jtvnw.net/emoticons/v1/30259/1.0" alt="HeyGuys" title="HeyGuys"> <img class="emoticon" src="http://static-cdn.jtvnw.net/emoticons/v1/86/1.0" alt="BibleThump" title="BibleThump">
+    //"<img class=\"emoticon\" src=\"http://static-cdn.jtvnw.net/emoticons/v1/30259/1.0\" alt=\"HeyGuys\" title=\"HeyGuys\"> <img class=\"emoticon\" src=\"http://static-cdn.jtvnw.net/emoticons/v1/86/1.0\" alt=\"BibleThump\" title=\"BibleThump\">"
 	
 	//since parsing through reg exp is a pain here's how its going to go down
 	//create an array of the numbers you find in the <span>s by looping through the text.  that'll be stored in emoteNumArr
 	//then go back through the text the same amount of times that the emoteNumArr.length and put the replacement string in with the numbers
 	//stupid right? there has to be a better way.
 
+    
+    
 	//turns out we need to return the updated text, as well as the amount of emotes are in the sentence.
-	var extractEmoteNumRegExpG = /emo-(\d+)/g;
-	var emoticonSpanHtmlRegExp = /<span.+?\/span>/;
+    var extractEmoteUrl = /<img class="emoticon".*?src="(.+?)".*?title="(\w+)".*?>/g;
+	var emoticonSpanHtmlRegExp = /<img.+?>/;
 	function textPreProcess(text){
 		var filteredText = text;
-		var emoteNumArr = [];
-		var tempEmoteNum = 0;
+		var emoteKeyArr = [];
+        var currEmoteUrlKey = [];
 		var emoteCount = 0;
 		if(emoticonSpanHtmlRegExp.test(filteredText))
 		{
-			//programming note: getting multiple instances of a reg exp match requires you to place a /g global and go through the exec multiple times until you hit a null
-			//how is that acceptable...
-			while((tempEmoteNum=extractEmoteNumRegExpG.exec(filteredText)) !== null)
+			//programming note: getting multiple instances of a reg exp match requires you to place a /g global and go through the exec multiple times until you hit a null, how is that acceptable...
+			while((currEmoteUrlKey=extractEmoteUrl.exec(filteredText)) !== null)
 			{
+                addToEmoteMap(currEmoteUrlKey[2], currEmoteUrlKey[1]);
 				//push the second index since exec captures returns the complete match then the captured match........
-				emoteNumArr.push(tempEmoteNum[1]);
+				emoteKeyArr.push(currEmoteUrlKey[2]);
 			}
-			for(var i = 0, emoteLength = emoteNumArr.length; i < emoteLength; i++)
+			for(var i = 0, emoteLength = emoteKeyArr.length; i < emoteLength; i++)
 			{
-				filteredText = filteredText.replace(emoticonSpanHtmlRegExp, "@@"+emoteNumArr[i]+"|||");
+				filteredText = filteredText.replace(emoticonSpanHtmlRegExp, "@@"+emoteKeyArr[i]+"|||");
 			}
 			emoteCount = emoteLength;
 		}
 		return {text: filteredText, emoteCount: emoteCount};
 	}
+    
+    //simple function adds keyword and url to emoticonUrlMapping if it doesn't exist yet.
+    function addToEmoteMap(keyword, url){
+        if(!emoticonUrlMap[keyword]){
+            emoticonUrlMap[keyword] = url;
+        }
+    }
 
 
 		//animate takes in that 2d array of strings and processes it,
 		//removes strings when they reach the end are not visible.
 		//also interprets image icons and displays those instead of string.
-		//split the text string to catch emotes tokens @@##|||
+		//split the text string to catch emotes tokens @@\w+|||
 		//print the array and in between each split, insert the image.
 		//TODO: issue with the animate in that 
-		var emoteTokenRegExpYesCap = /@{2}(\d+)\|{3}/g;
-		var emoteTokenRegExpNoCap = /@{2}\d+\|{3}/g
+		var emoteTokenRegExpYesCap = /@{2}(\w+)\|{3}/g;
+		var emoteTokenRegExpNoCap = /@{2}\w+\|{3}/g
 		window.requestAnimFrame = (function(callback) {
 			return function(callback) {window.setTimeout(callback, 1000 / fps);};
 		})();
@@ -299,22 +309,22 @@ nicoNicoTwitch = function(){
 		//condition for when we're just starting, display ALL the nicks
 		if(lastOutputtedTextID === undefined)
 		{	
-			$lines = $('.line');
+			$lines = $('.chat-line');
 		}
 		else
 		{
-			$lines = $('#'+lastOutputtedTextID).parent().parent().nextAll();
+			$lines = $('#'+lastOutputtedTextID).nextAll(".chat-line");
 		}
 		if($lines.length != 0)
 		{
 			$lines.each(function(index){
-				var color = ($(this).find('.nick').attr('style') ? $(this).find('.nick').attr('style').split(":")[1] : "white");
-				$(this).find('.chat_line').each(function(index){
+				var color = ($(this).find('.from').attr('style') ? $(this).find('.from').attr('style').split(":")[1] : "white");
+				$(this).find('.message').each(function(index){
 					insertText($(this).html(), color);
 				});
 			});
 			
-			lastOutputtedTextID = $lines.last().find('.nick').attr('id');
+			lastOutputtedTextID = $lines.last().attr('id');
 		}
 		scheduleTextScrape(lastOutputtedTextID);
 		return lastOutputtedTextID;
@@ -325,7 +335,9 @@ nicoNicoTwitch = function(){
 	}
 	  
 		  
-		  //returns array of url mapping
+    //returns array of url mapping
+    //the map will be generated as the user puts in the emote.  This way we don't need to parse through twitch's ridiculous amounts of emotes which are now currently at the 30000~ count.
+    //a map of emote name to url is created and new values are inserted, the proper canvas string is fofrmed
 	function getEmoticonList(){
 		var emoticonUrlMap = [];
 		var insideParensRegExp = /\(([^)]+)\)/;
@@ -362,7 +374,7 @@ nicoNicoTwitch = function(){
 	}
 	
 	this.init = function(){
-		emoticonUrlMap = getEmoticonList();
+		//emoticonUrlMap = getEmoticonList();
 		insertText("initialized");
 		animate();
 	  	scheduleTextScrape();
